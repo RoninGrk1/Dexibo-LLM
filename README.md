@@ -8,6 +8,15 @@ Built to run on about **4GB of RAM** with a quantised 3B–7B model. Works in **
 
 ---
 
+## What's new in v0.4
+
+Two upgrades that make Dexibo feel more like a real product:
+
+1. **Streaming chat** — answers appear token-by-token in the web UI (`POST /api/chat/stream`). If streaming fails, it quietly falls back to the normal chat API.
+2. **Markets watchlist** — a slim quote strip above the chat (and CLI `/watch`) for symbols you choose with `DEXIBO_WATCHLIST` (default AAPL, MSFT, VWRL.L, BTC-USD). Always labelled **Delayed · unofficial**.
+
+See `examples/upgrades.md` for curl demos.
+
 ## Quick start
 
 ```bash
@@ -51,6 +60,8 @@ python -m dexibo once "What is an ISA?"
 | **Knowledge (RAG)** | Pulls short UK/Europe notes (ISA, SIPP, Open Banking, KYC/AML, and more) into answers |
 | **Guardrails** | Blocks scam / fraud / “evade KYC” asks; softens “you should buy X” style advice |
 | **Quotes** | Optional delayed prices (e.g. `/quote AAPL`) — labelled unofficial |
+| **Watchlist** | Configurable symbols on the web strip + `/watch` (delayed) |
+| **Streaming** | Live token streaming in the browser (SSE) |
 | **Web UI** | Clean dark fintech chat at port `8787` |
 
 ---
@@ -102,6 +113,7 @@ cp .env.example .env
 | `/concepts` | List all concepts |
 | `/rag <query>` | Show retrieved knowledge chunks |
 | `/quote <symbol>` | Delayed unofficial quote |
+| `/watch` | Markets watchlist table |
 | `/upgrades` | List built-in upgrades |
 | `/disclaimer` | Show the short disclaimer |
 | `/quit` | Exit |
@@ -126,7 +138,7 @@ cp .env.example .env
 
 ## Web UI
 
-Modern dark chat: navy background, cyan accents, quick-action chips (ISA, compound calc, AAPL quote, Open Banking).
+Modern dark chat: navy background, cyan accents, markets watchlist strip, live streaming replies, and quick-action chips (ISA, compound calc, AAPL quote, Open Banking).
 
 ```bash
 python -m dexibo web
@@ -140,6 +152,8 @@ Useful API routes:
 |--------|------|---------|
 | `GET` | `/api/health` | Version, backend, feature flags |
 | `POST` | `/api/chat` | `{ "message": "..." }` → reply |
+| `POST` | `/api/chat/stream` | Same body → SSE tokens (`token` / `done` / `error`) |
+| `GET` | `/api/watchlist` | Quotes for `DEXIBO_WATCHLIST` symbols |
 | `GET` | `/api/quote/{symbol}` | Delayed quote helper |
 
 Change host/port with `DEXIBO_WEB_HOST` and `DEXIBO_WEB_PORT` (see `.env.example`).
@@ -157,6 +171,7 @@ Change host/port with `DEXIBO_WEB_HOST` and `DEXIBO_WEB_PORT` (see `.env.example
 | `DEXIBO_RAG` | on | Knowledge retrieval |
 | `DEXIBO_GUARDRAILS` | on | Safety checks |
 | `DEXIBO_QUOTES` | on | Delayed quotes |
+| `DEXIBO_WATCHLIST` | `AAPL,MSFT,VWRL.L,BTC-USD` | Symbols for web strip + `/watch` |
 | `DEXIBO_DEFAULT_CURRENCY` | `GBP` | Example currency framing |
 
 ---
@@ -169,7 +184,7 @@ web/             # Browser UI (HTML / CSS / JS)
 knowledge/       # Short markdown notes for RAG
 scripts/         # Model download + web launcher
 models/          # Put GGUF files here (not committed)
-examples/        # Sample sessions
+examples/        # Sample sessions + upgrade demos
 ```
 
 ---

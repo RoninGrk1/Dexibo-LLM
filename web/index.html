@@ -32,7 +32,7 @@
         <span class="pill" data-flag="guardrails">Guardrails</span>
         <span class="pill" data-flag="quotes">Quotes</span>
       </nav>
-      <p class="rail-foot">v<span id="versionLabel">0.3</span> · local demo</p>
+      <p class="rail-foot">v<span id="versionLabel">0.4</span> · local demo</p>
     </aside>
 
     <main class="stage">
@@ -44,6 +44,22 @@
           <span id="backendLabelMobile">…</span>
         </span>
       </header>
+
+      <section class="markets-strip" id="marketsStrip" aria-label="Markets watchlist">
+        <div class="markets-head">
+          <span class="markets-title">Markets</span>
+          <span class="markets-label" id="marketsLabel">Delayed · unofficial</span>
+          <button type="button" class="markets-refresh" id="marketsRefresh" aria-label="Refresh watchlist" title="Refresh">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M21 3v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="markets-row" id="marketsRow" role="list">
+          <span class="markets-loading">Loading quotes…</span>
+        </div>
+      </section>
 
       <div class="transcript" id="transcript" role="log" aria-live="polite" aria-relevant="additions" aria-label="Chat transcript">
         <!-- welcome injected by app.js -->

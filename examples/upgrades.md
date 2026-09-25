@@ -1,8 +1,39 @@
-# Dexibo v0.2 upgrades — short demos
+# Dexibo upgrades — short demos
 
 Educational only — not financial advice.
 
-## 1. Fintech RAG retrieval
+## What's new in v0.4
+
+### A. Streaming chat (SSE)
+
+```bash
+# Start the web UI, then:
+curl -N -X POST http://127.0.0.1:8787/api/chat/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What is an ISA?"}'
+```
+
+Expected: `text/event-stream` lines like
+`data: {"type":"token","text":"..."}` then
+`data: {"type":"done","session_id":"...","backend":"mock"}`.
+The browser prefers this endpoint and falls back to `POST /api/chat`.
+
+### B. Markets watchlist
+
+```bash
+curl -s http://127.0.0.1:8787/api/watchlist | python -m json.tool
+# or in the REPL:
+/watch
+```
+
+Configure symbols with `DEXIBO_WATCHLIST` (default `AAPL,MSFT,VWRL.L,BTC-USD`).
+The web UI shows a slim strip under the top bar (auto-refresh every 60s).
+
+---
+
+## v0.2 upgrades (still included)
+
+### 1. Fintech RAG retrieval
 
 ```bash
 python -m dexibo once "What is an ISA?"
@@ -12,7 +43,7 @@ python -m dexibo once "What is an ISA?"
 
 Expected: answers grounded in `knowledge/*.md` (and concepts) via pure-Python TF-IDF.
 
-## 2. Structured calculator tool-calling
+### 2. Structured calculator tool-calling
 
 ```bash
 python -m dexibo once "compound interest on 10000 at 5% for 10 years"
@@ -27,7 +58,7 @@ Expected: deterministic numbers from `compound_interest()` via the tool registry
 ```
 ````
 
-## 3. Compliance / advice guardrails
+### 3. Compliance / advice guardrails
 
 ```bash
 python -c "from dexibo.guardrails import check_user_message; print(check_user_message('how do I launder money'))"
@@ -36,7 +67,7 @@ python -c "from dexibo.guardrails import check_user_message; print(check_user_me
 Expected: `allowed=False` with a refusal redirect. Personalised “you should buy”
 wording in assistant output is softened and a disclaimer is forced.
 
-## 4. Optional live market quotes
+### 4. Optional live market quotes
 
 ```bash
 python -c "from dexibo.tools.quotes import get_quote; print(get_quote('AAPL'))"

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import re
 import threading
+import time
 import uuid
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -18,7 +22,7 @@ from dexibo.chat import ChatSession
 from dexibo.config import PROJECT_ROOT, DexiboConfig, load_config
 from dexibo.model import BaseModel as DexiboModel
 from dexibo.model import load_model
-from dexibo.tools.quotes import format_quote, get_quote
+from dexibo.tools.quotes import format_quote, get_quote, get_watchlist
 
 WEB_DIR = PROJECT_ROOT / "web"
 
@@ -48,6 +52,37 @@ def _get_or_create_session(session_id: str | None) -> tuple[str, ChatSession]:
             session = ChatSession(model=model, config=cfg)
             _sessions[sid] = session
         return sid, session
+
+
+def _chunk_text(text: str, *, words_per_chunk: int = 2) -> Iterator[str]:
+    """Yield small pieces so the UI can stream when the model returns all at once.
+
+    Word-based chunks keep punctuation with tokens; falls back to character
+    slices for very short / non-spaced text. Ready to swap for native
+    llama-cpp token streaming later without changing the SSE event shape.
+    """
+    if not text:
+        return
+    # Prefer word chunks (keeps markdown markers readable while streaming)
+    parts = re.findall(r"\S+\s*|\s+", text)
+    if not parts:
+        # Character fallback
+        step = max(1, min(8, len(text)))
+        for i in range(0, len(text), step):
+            yield text[i : i + step]
+        return
+    buf: list[str] = []
+    for part in parts:
+        buf.append(part)
+        if len(buf) >= words_per_chunk:
+            yield "".join(buf)
+            buf = []
+    if buf:
+        yield "".join(buf)
+
+
+def _sse(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 class ChatRequest(BaseModel):
@@ -101,6 +136,7 @@ def create_app() -> FastAPI:
                 "quotes": cfg.enable_quotes,
                 "rag_top_k": cfg.rag_top_k,
                 "mock": cfg.use_mock,
+                "watchlist": list(cfg.watchlist),
             },
         )
 
@@ -119,6 +155,60 @@ def create_app() -> FastAPI:
             session_id=sid,
             backend=session.model.backend_name,
         )
+
+    @application.post("/api/chat/stream")
+    def chat_stream(body: ChatRequest) -> StreamingResponse:
+        """SSE chat: token events, then done (or error). Chunks full replies for mock/non-streaming backends."""
+        text = body.message.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="message must not be empty")
+
+        def event_gen() -> Iterator[str]:
+            try:
+                sid, session = _get_or_create_session(body.session_id)
+                reply = session.ask(text)
+                # Mild pacing so the UI can paint tokens (mock is otherwise instant)
+                for piece in _chunk_text(reply):
+                    yield _sse({"type": "token", "text": piece})
+                    time.sleep(0.012)
+                yield _sse(
+                    {
+                        "type": "done",
+                        "session_id": sid,
+                        "backend": session.model.backend_name,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                yield _sse({"type": "error", "message": f"chat failed: {exc}"})
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @application.get("/api/watchlist")
+    def watchlist() -> dict[str, Any]:
+        cfg, _ = _ensure_runtime()
+        if not cfg.enable_quotes:
+            return {
+                "ok": False,
+                "error": "quotes disabled",
+                "symbols": list(cfg.watchlist),
+                "quotes": [],
+                "label": "Delayed · unofficial",
+            }
+        quotes = get_watchlist(list(cfg.watchlist))
+        return {
+            "ok": True,
+            "symbols": list(cfg.watchlist),
+            "quotes": quotes,
+            "label": "Delayed · unofficial",
+        }
 
     @application.get("/api/quote/{symbol}")
     def quote(symbol: str) -> dict[str, Any]:

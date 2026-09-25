@@ -63,6 +63,8 @@ class DexiboConfig:
     enable_guardrails: bool = True
     enable_quotes: bool = True
     rag_top_k: int = 3
+    # v0.4 — markets watchlist (comma-separated tickers)
+    watchlist: tuple[str, ...] = ("AAPL", "MSFT", "VWRL.L", "BTC-USD")
 
     @property
     def model_exists(self) -> bool:
@@ -71,6 +73,23 @@ class DexiboConfig:
     @property
     def use_mock(self) -> bool:
         return self.force_mock or not self.model_exists
+
+
+
+def _parse_watchlist(raw: str | None) -> tuple[str, ...]:
+    """Parse DEXIBO_WATCHLIST (comma-separated). Default AAPL,MSFT,VWRL.L,BTC-USD."""
+    default = ("AAPL", "MSFT", "VWRL.L", "BTC-USD")
+    if raw is None or not str(raw).strip():
+        return default
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in str(raw).split(","):
+        sym = part.strip().upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        out.append(sym)
+    return tuple(out) if out else default
 
 
 def load_config() -> DexiboConfig:
@@ -100,6 +119,7 @@ def load_config() -> DexiboConfig:
         enable_guardrails=_env_bool("DEXIBO_GUARDRAILS", True),
         enable_quotes=_env_bool("DEXIBO_QUOTES", True),
         rag_top_k=_env_int("DEXIBO_RAG_TOP_K", 3),
+        watchlist=_parse_watchlist(os.getenv("DEXIBO_WATCHLIST")),
     )
 
 

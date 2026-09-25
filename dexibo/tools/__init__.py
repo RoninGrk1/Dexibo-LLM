@@ -8,7 +8,13 @@ from dexibo.tools.calculator import (
     risk_metrics,
 )
 from dexibo.tools.market_knowledge import CONCEPTS, lookup_concept, search_concepts
-from dexibo.tools.quotes import detect_quote_symbol, format_quote, get_quote
+from dexibo.tools.quotes import (
+    detect_quote_symbol,
+    format_quote,
+    get_quote,
+    get_watchlist,
+    parse_watchlist_symbols,
+)
 from dexibo.tools.registry import (
     TOOL_SCHEMAS,
     detect_and_run_from_text,
@@ -31,6 +37,8 @@ __all__ = [
     "get_quote",
     "format_quote",
     "detect_quote_symbol",
+    "get_watchlist",
+    "parse_watchlist_symbols",
     "TOOL_SCHEMAS",
     "needs_calculator",
     "tool_instructions_block",

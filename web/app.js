@@ -1,5 +1,5 @@
 /**
- * Dexibo web client — single-page chat UI
+ * Dexibo web client — streaming chat + markets watchlist
  */
 (function () {
   "use strict";
@@ -17,9 +17,13 @@
   const backendLabel = document.getElementById("backendLabel");
   const backendLabelMobile = document.getElementById("backendLabelMobile");
   const versionLabel = document.getElementById("versionLabel");
+  const marketsRow = document.getElementById("marketsRow");
+  const marketsLabel = document.getElementById("marketsLabel");
+  const marketsRefresh = document.getElementById("marketsRefresh");
 
   let sessionId = null;
   let busy = false;
+  let watchTimer = null;
 
   function escapeHtml(s) {
     return String(s)
@@ -110,6 +114,31 @@
     return wrap;
   }
 
+  function startStreamingBubble() {
+    const wrap = document.createElement("div");
+    wrap.className = "msg assistant streaming";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.innerHTML = '<span class="stream-cursor" aria-hidden="true"></span>';
+    wrap.appendChild(bubble);
+    transcript.appendChild(wrap);
+    transcript.scrollTop = transcript.scrollHeight;
+    return { wrap, bubble, raw: "" };
+  }
+
+  function updateStreamingBubble(state, chunk) {
+    state.raw += chunk;
+    state.bubble.innerHTML =
+      renderMarkdown(state.raw) +
+      '<span class="stream-cursor" aria-hidden="true"></span>';
+    transcript.scrollTop = transcript.scrollHeight;
+  }
+
+  function finishStreamingBubble(state) {
+    state.wrap.classList.remove("streaming");
+    state.bubble.innerHTML = renderMarkdown(state.raw || "(empty reply)");
+  }
+
   function setBusy(on) {
     busy = on;
     sendBtn.disabled = on;
@@ -121,14 +150,18 @@
     input.style.height = Math.min(input.scrollHeight, 140) + "px";
   }
 
+  function setBackend(backend) {
+    if (!backend) return;
+    backendLabel.textContent = backend;
+    backendLabelMobile.textContent = backend;
+  }
+
   async function loadHealth() {
     try {
       const res = await fetch("/api/health");
       if (!res.ok) throw new Error("health " + res.status);
       const data = await res.json();
-      const backend = data.backend || "unknown";
-      backendLabel.textContent = backend;
-      backendLabelMobile.textContent = backend;
+      setBackend(data.backend || "unknown");
       if (data.version) versionLabel.textContent = data.version;
       const flags = data.flags || {};
       document.querySelectorAll(".pill").forEach((el) => {
@@ -141,22 +174,164 @@
         el.classList.toggle("on", on);
       });
     } catch (err) {
-      backendLabel.textContent = "offline";
-      backendLabelMobile.textContent = "offline";
+      setBackend("offline");
       console.warn("health check failed", err);
     }
   }
 
-  async function sendMessage(raw) {
-    const text = (raw || "").trim();
-    if (!text || busy) return;
+  function formatPrice(q) {
+    if (!q || !q.ok) return "—";
+    const n = Number(q.price);
+    if (!Number.isFinite(n)) return "—";
+    if (n >= 1000) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    if (n >= 1) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+    return n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  }
 
-    appendMessage("user", text);
-    input.value = "";
-    autoResize();
-    setBusy(true);
+  function formatPct(q) {
+    if (!q || !q.ok || q.change_pct == null) return null;
+    const n = Number(q.change_pct);
+    if (!Number.isFinite(n)) return null;
+    const sign = n > 0 ? "+" : "";
+    return { text: `${sign}${n.toFixed(2)}%`, up: n >= 0 };
+  }
+
+  function renderWatchlist(data) {
+    if (!marketsRow) return;
+    if (data && data.label && marketsLabel) {
+      marketsLabel.textContent = data.label;
+    }
+    const quotes = (data && data.quotes) || [];
+    if (!quotes.length) {
+      marketsRow.innerHTML =
+        '<span class="markets-loading">No quotes (check DEXIBO_QUOTES / network)</span>';
+      return;
+    }
+    marketsRow.innerHTML = "";
+    for (const q of quotes) {
+      const card = document.createElement("div");
+      card.className = "market-chip" + (q.ok ? "" : " is-err");
+      card.setAttribute("role", "listitem");
+      const sym = escapeHtml(q.symbol || "?");
+      if (!q.ok) {
+        card.innerHTML =
+          `<span class="m-sym">${sym}</span>` +
+          `<span class="m-price muted">n/a</span>`;
+        card.title = q.error || "quote unavailable";
+      } else {
+        const pct = formatPct(q);
+        let pctHtml = "";
+        if (pct) {
+          pctHtml = `<span class="m-pct ${pct.up ? "up" : "down"}">${escapeHtml(
+            pct.text
+          )}</span>`;
+        }
+        const cur = q.currency ? `<span class="m-cur">${escapeHtml(q.currency)}</span>` : "";
+        card.innerHTML =
+          `<span class="m-sym">${sym}</span>` +
+          `<span class="m-price">${escapeHtml(formatPrice(q))}</span>` +
+          cur +
+          pctHtml;
+        card.title = `${q.symbol} · ${q.source || "delayed"} · as of ${q.as_of || "—"}`;
+      }
+      marketsRow.appendChild(card);
+    }
+  }
+
+  async function loadWatchlist() {
+    if (!marketsRow) return;
+    try {
+      if (marketsRefresh) marketsRefresh.classList.add("spinning");
+      const res = await fetch("/api/watchlist");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        marketsRow.innerHTML =
+          '<span class="markets-loading">Watchlist unavailable</span>';
+        return;
+      }
+      renderWatchlist(data);
+    } catch (err) {
+      console.warn("watchlist failed", err);
+      marketsRow.innerHTML =
+        '<span class="markets-loading">Watchlist offline</span>';
+    } finally {
+      if (marketsRefresh) marketsRefresh.classList.remove("spinning");
+    }
+  }
+
+  function scheduleWatchlist() {
+    if (watchTimer) clearInterval(watchTimer);
+    watchTimer = setInterval(() => {
+      if (document.visibilityState === "visible") loadWatchlist();
+    }, 60000);
+  }
+
+  async function sendViaStream(text) {
+    const res = await fetch("/api/chat/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    if (!res.ok || !res.body) {
+      const errBody = await res.json().catch(() => ({}));
+      const detail = errBody.detail || res.statusText || "stream failed";
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+    }
+
+    const state = startStreamingBubble();
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let sawDone = false;
+    let errorMsg = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const block of parts) {
+        const lines = block.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === "[DONE]") continue;
+          let evt;
+          try {
+            evt = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+          if (evt.type === "token" && evt.text) {
+            updateStreamingBubble(state, evt.text);
+          } else if (evt.type === "done") {
+            sawDone = true;
+            if (evt.session_id) sessionId = evt.session_id;
+            if (evt.backend) setBackend(evt.backend);
+          } else if (evt.type === "error") {
+            errorMsg = evt.message || "stream error";
+          }
+        }
+      }
+    }
+
+    if (errorMsg) {
+      state.wrap.remove();
+      throw new Error(errorMsg);
+    }
+    if (!state.raw && !sawDone) {
+      state.wrap.remove();
+      throw new Error("empty stream");
+    }
+    finishStreamingBubble(state);
+  }
+
+  async function sendViaJson(text) {
     const thinking = appendMessage("assistant", "", { typing: true });
-
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -171,13 +346,31 @@
         return;
       }
       if (data.session_id) sessionId = data.session_id;
-      if (data.backend) {
-        backendLabel.textContent = data.backend;
-        backendLabelMobile.textContent = data.backend;
-      }
+      if (data.backend) setBackend(data.backend);
       appendMessage("assistant", data.reply || "(empty reply)");
     } catch (err) {
       thinking.remove();
+      throw err;
+    }
+  }
+
+  async function sendMessage(raw) {
+    const text = (raw || "").trim();
+    if (!text || busy) return;
+
+    appendMessage("user", text);
+    input.value = "";
+    autoResize();
+    setBusy(true);
+
+    try {
+      try {
+        await sendViaStream(text);
+      } catch (streamErr) {
+        console.warn("stream failed, falling back to /api/chat", streamErr);
+        await sendViaJson(text);
+      }
+    } catch (err) {
       appendMessage(
         "assistant",
         `I couldn't reach the Dexibo API. Is the server running?\n\n\`${String(err)}\``
@@ -209,8 +402,18 @@
     });
   });
 
+  if (marketsRefresh) {
+    marketsRefresh.addEventListener("click", () => loadWatchlist());
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadWatchlist();
+  });
+
   // Empty state welcome
   appendMessage("assistant", WELCOME);
   loadHealth();
+  loadWatchlist();
+  scheduleWatchlist();
   input.focus();
 })();

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 _UA = (
-    "Mozilla/5.0 (compatible; Dexibo/0.2; +https://github.com/example/dexibo) "
+    "Mozilla/5.0 (compatible; Dexibo/0.4; +https://github.com/example/dexibo) "
     "Educational-quote-client"
 )
 _TIMEOUT = 8
@@ -78,7 +78,19 @@ def get_quote(symbol: str) -> dict[str, Any]:
             as_of = datetime.now(tz=timezone.utc).isoformat()
         if price is None:
             raise KeyError("no price in response")
-        return {
+        prev = meta.get("chartPreviousClose") or meta.get("previousClose")
+        change = None
+        change_pct = None
+        if prev is not None:
+            try:
+                prev_f = float(prev)
+                price_f = float(price)
+                if prev_f != 0:
+                    change = price_f - prev_f
+                    change_pct = (change / prev_f) * 100.0
+            except (TypeError, ValueError):
+                pass
+        out: dict[str, Any] = {
             "ok": True,
             "symbol": meta.get("symbol") or sym,
             "price": float(price),
@@ -91,6 +103,16 @@ def get_quote(symbol: str) -> dict[str, Any]:
                 "not advice, verify with your broker."
             ),
         }
+        if prev is not None:
+            try:
+                out["previous_close"] = float(prev)
+            except (TypeError, ValueError):
+                pass
+        if change is not None:
+            out["change"] = round(change, 6)
+        if change_pct is not None:
+            out["change_pct"] = round(change_pct, 4)
+        return out
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         return {
             "ok": False,
@@ -114,6 +136,9 @@ def format_quote(quote: dict[str, Any]) -> str:
         f"- Price: {quote['price']:,.4g} {quote.get('currency', '')}".rstrip(),
         f"- As of: {quote.get('as_of', '—')} (UTC)",
     ]
+    if quote.get("change_pct") is not None:
+        sign = "+" if quote["change_pct"] >= 0 else ""
+        lines.append(f"- Change: {sign}{quote['change_pct']:.2f}%")
     if quote.get("exchange"):
         lines.append(f"- Exchange: {quote['exchange']}")
     lines.append(f"- Source: {quote['source']}")
@@ -176,4 +201,25 @@ def detect_quote_symbol(user_message: str) -> str | None:
     return None
 
 
-__all__ = ["get_quote", "format_quote", "detect_quote_symbol"]
+
+def parse_watchlist_symbols(raw: str | None, default: str = "AAPL,MSFT,VWRL.L,BTC-USD") -> list[str]:
+    """Parse comma-separated watchlist symbols from env or config string."""
+    src = (raw if raw is not None and str(raw).strip() else default)
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in str(src).split(","):
+        sym = part.strip().upper()
+        if not sym or sym in seen:
+            continue
+        seen.add(sym)
+        out.append(sym)
+    return out or ["AAPL", "MSFT", "VWRL.L", "BTC-USD"]
+
+
+def get_watchlist(symbols: list[str] | None = None) -> list[dict[str, Any]]:
+    """Fetch quotes for a list of symbols; each failure is a graceful ok=False entry."""
+    syms = symbols if symbols is not None else parse_watchlist_symbols(None)
+    return [get_quote(s) for s in syms]
+
+
+__all__ = ["get_quote", "format_quote", "detect_quote_symbol", "parse_watchlist_symbols", "get_watchlist"]

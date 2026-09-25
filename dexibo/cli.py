@@ -27,7 +27,7 @@ from dexibo.tools.calculator import (
     risk_metrics,
 )
 from dexibo.tools.market_knowledge import CONCEPTS, lookup_concept, search_concepts
-from dexibo.tools.quotes import format_quote, get_quote
+from dexibo.tools.quotes import format_quote, get_quote, get_watchlist
 
 app = typer.Typer(
     name="dexibo",
@@ -48,7 +48,8 @@ HELP_TEXT = """\
   /concepts          List curated concepts
   /rag <query>       Show TF-IDF retrieved knowledge chunks
   /quote <symbol>    Delayed unofficial market quote (Yahoo)
-  /upgrades          List the four v0.2 upgrades
+  /watch             Markets watchlist table (DEXIBO_WATCHLIST)
+  /upgrades          List product upgrades (v0.2–v0.4)
   /disclaimer        Show the short disclaimer
   /quit  /exit       Leave the REPL
 
@@ -64,23 +65,18 @@ Anything else is sent to the assistant (mock or GGUF).
 """
 
 UPGRADES_TEXT = """\
-[bold cyan]Dexibo v0.2 — four upgrades[/bold cyan]
+[bold cyan]Dexibo upgrades[/bold cyan]
 
-1. [bold]Fintech RAG retrieval[/bold] (`dexibo/rag/`)
-   Pure-Python TF-IDF over `knowledge/*.md` + market concepts.
-   Slash: `/rag <query>` · flag: `DEXIBO_RAG=1`
+[bold]v0.2[/bold]
+1. Fintech RAG · 2. Calculator tools · 3. Guardrails · 4. Delayed quotes
 
-2. [bold]Structured calculator tool-calling[/bold] (`dexibo/tools/registry.py`)
-   Schema registry + fenced JSON tool calls for LlamaCpp; mock uses the same functions.
-   Tools: compound_interest, loan_amortisation, percent_return, cagr, risk_metrics
+[bold]v0.3[/bold]
+Web chat UI (FastAPI) at port 8787
 
-3. [bold]Compliance / advice guardrails[/bold] (`dexibo/guardrails.py`)
-   Pre-check refuses fraud / ML / manipulation / KYC evasion; post-check softens advice.
-   Flag: `DEXIBO_GUARDRAILS=1` (default on)
-
-4. [bold]Optional live market quotes[/bold] (`dexibo/tools/quotes.py`)
-   Stdlib urllib → Yahoo Finance chart (labelled delayed / unofficial).
-   Slash: `/quote AAPL` · flag: `DEXIBO_QUOTES=1`
+[bold cyan]v0.4 — what's new[/bold cyan]
+A. [bold]Streaming chat (SSE)[/bold] — `POST /api/chat/stream`; tokens appear live in the browser
+B. [bold]Markets watchlist[/bold] — `GET /api/watchlist`, web strip, CLI `/watch`
+   Env: `DEXIBO_WATCHLIST=AAPL,MSFT,VWRL.L,BTC-USD`
 """
 
 
@@ -200,6 +196,52 @@ def _handle_quote(args: list[str]) -> None:
     console.print(f"[dim]{DISCLAIMER_SHORT}[/dim]")
 
 
+
+def _handle_watch(config: DexiboConfig) -> None:
+    """Print the configured markets watchlist as a Rich table."""
+    if not config.enable_quotes:
+        console.print("[yellow]Quotes are disabled[/yellow] (DEXIBO_QUOTES=0).")
+        return
+    symbols = list(config.watchlist)
+    with console.status("[cyan]Fetching watchlist…[/cyan]"):
+        quotes = get_watchlist(symbols)
+    table = Table(title="Markets watchlist · Delayed · unofficial", show_lines=False)
+    table.add_column("Symbol", style="bold cyan")
+    table.add_column("Price", justify="right")
+    table.add_column("Change %", justify="right")
+    table.add_column("Currency")
+    table.add_column("As of (UTC)")
+    table.add_column("Status")
+    for q in quotes:
+        if q.get("ok"):
+            pct = q.get("change_pct")
+            if pct is None:
+                pct_s = "—"
+            else:
+                sign = "+" if pct >= 0 else ""
+                style = "green" if pct >= 0 else "red"
+                pct_s = f"[{style}]{sign}{pct:.2f}%[/{style}]"
+            table.add_row(
+                str(q.get("symbol", "?")),
+                f"{q['price']:,.4g}",
+                pct_s,
+                str(q.get("currency") or "—"),
+                str(q.get("as_of") or "—")[:19],
+                "[green]ok[/green]",
+            )
+        else:
+            table.add_row(
+                str(q.get("symbol", "?")),
+                "—",
+                "—",
+                "—",
+                "—",
+                f"[red]{q.get('error', 'fail')[:40]}[/red]",
+            )
+    console.print(table)
+    console.print(f"[dim]Symbols from DEXIBO_WATCHLIST · {DISCLAIMER_SHORT}[/dim]")
+
+
 def _handle_slash(line: str, session: ChatSession, config: DexiboConfig) -> bool:
     """Handle a slash command. Return False if the REPL should exit."""
     parts = line.strip().split()
@@ -228,7 +270,8 @@ def _handle_slash(line: str, session: ChatSession, config: DexiboConfig) -> bool
                 f"temp={config.temperature}  max_tokens={config.max_tokens}\n"
                 f"currency={config.default_currency}\n"
                 f"rag={config.enable_rag}  top_k={config.rag_top_k}\n"
-                f"guardrails={config.enable_guardrails}  quotes={config.enable_quotes}",
+                f"guardrails={config.enable_guardrails}  quotes={config.enable_quotes}\n"
+                f"watchlist={', '.join(config.watchlist)}",
                 title="Model / config",
                 border_style="magenta",
             )
@@ -250,8 +293,10 @@ def _handle_slash(line: str, session: ChatSession, config: DexiboConfig) -> bool
         _handle_rag(args, config)
     elif cmd == "/quote":
         _handle_quote(args)
+    elif cmd == "/watch":
+        _handle_watch(config)
     elif cmd == "/upgrades":
-        console.print(Panel(UPGRADES_TEXT, title="Upgrades (v0.2)", border_style="cyan"))
+        console.print(Panel(UPGRADES_TEXT, title="Upgrades", border_style="cyan"))
     elif cmd == "/concept":
         if not args:
             console.print("[yellow]Usage:[/yellow] /concept <name>")
