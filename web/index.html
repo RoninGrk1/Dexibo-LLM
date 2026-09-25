@@ -32,7 +32,7 @@
         <span class="pill" data-flag="guardrails">Guardrails</span>
         <span class="pill" data-flag="quotes">Quotes</span>
       </nav>
-      <p class="rail-foot">v<span id="versionLabel">0.4</span> · local demo</p>
+      <p class="rail-foot">v<span id="versionLabel">0.5</span> · local demo</p>
     </aside>
 
     <main class="stage">
@@ -60,6 +60,18 @@
           <span class="markets-loading">Loading quotes…</span>
         </div>
       </section>
+
+      <div class="compliance-bar" id="complianceBar" role="note">
+        <span class="jurisdiction-banner" id="jurisdictionBanner">Loading jurisdiction…</span>
+        <span class="compliance-disclaimer" id="complianceDisclaimer">Educational only — not financial advice.</span>
+      </div>
+
+      <div class="session-toolbar" role="toolbar" aria-label="Session actions">
+        <button type="button" class="tool-btn" id="newChatBtn" title="New chat">New chat</button>
+        <button type="button" class="tool-btn" id="exportMdBtn" title="Export markdown">Export MD</button>
+        <button type="button" class="tool-btn" id="scenariosBtn" title="Scenario studio" aria-expanded="false" aria-controls="scenarioDrawer">Scenarios</button>
+        <button type="button" class="tool-btn danger hidden" id="stopBtn" title="Stop streaming">Stop</button>
+      </div>
 
       <div class="transcript" id="transcript" role="log" aria-live="polite" aria-relevant="additions" aria-label="Chat transcript">
         <!-- welcome injected by app.js -->
@@ -96,6 +108,37 @@
       </div>
     </main>
   </div>
+  <aside class="scenario-drawer" id="scenarioDrawer" hidden aria-label="Scenario studio">
+    <div class="scenario-head">
+      <strong>Scenario studio</strong>
+      <button type="button" class="tool-btn" id="closeScenariosBtn" aria-label="Close scenarios">Close</button>
+    </div>
+    <form class="scenario-form" id="scenarioSavings" data-scenario="savings_goal">
+      <h4>Savings goal</h4>
+      <label>Target <input name="target" type="number" value="10000" required /></label>
+      <label>Monthly <input name="monthly" type="number" value="200" required /></label>
+      <label>Rate % <input name="annual_rate_pct" type="number" step="0.1" value="3" /></label>
+      <button type="submit" class="tool-btn primary">Run</button>
+    </form>
+    <form class="scenario-form" id="scenarioMortgage" data-scenario="mortgage_stress">
+      <h4>Mortgage stress</h4>
+      <label>Principal <input name="principal" type="number" value="200000" required /></label>
+      <label>Rate % <input name="annual_rate_pct" type="number" step="0.1" value="4.5" required /></label>
+      <label>Years <input name="years" type="number" value="25" required /></label>
+      <label>Shock % <input name="rate_shock_pct" type="number" step="0.1" value="2" /></label>
+      <button type="submit" class="tool-btn primary">Run</button>
+    </form>
+    <form class="scenario-form" id="scenarioInflation" data-scenario="inflation_drag">
+      <h4>Inflation drag</h4>
+      <label>Amount <input name="amount" type="number" value="10000" required /></label>
+      <label>Years <input name="years" type="number" value="10" required /></label>
+      <label>Inflation % <input name="inflation_pct" type="number" step="0.1" value="2.5" /></label>
+      <label>Nominal return % <input name="nominal_return_pct" type="number" step="0.1" value="0" /></label>
+      <button type="submit" class="tool-btn primary">Run</button>
+    </form>
+    <pre class="scenario-result" id="scenarioResult" aria-live="polite"></pre>
+  </aside>
+
   <script src="/app.js" defer></script>
 </body>
 </html>

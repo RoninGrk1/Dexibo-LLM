@@ -47,3 +47,17 @@ __all__ = [
     "format_tool_result",
     "detect_and_run_from_text",
 ]
+
+from dexibo.tools.scenarios import (
+    inflation_drag,
+    mortgage_stress,
+    run_scenario,
+    savings_goal,
+)
+
+__all__ += [
+    "savings_goal",
+    "mortgage_stress",
+    "inflation_drag",
+    "run_scenario",
+]

@@ -37,7 +37,7 @@ _REFUSAL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         re.compile(
             r"\b("
             r"pump\s+and\s+dump|market\s+manipulat|"
-            r"insider\s+trad|"
+            r"insider\s+trad(?:e|ing)?|"
             r"spoof(?:ing)?\s+(?:the\s+)?(?:order\s+)?book|"
             r"front[\s-]?run(?:ning)?"
             r")\b",
@@ -101,15 +101,32 @@ def guardrails_enabled(config_flag: bool | None = None) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def check_user_message(text: str) -> dict[str, Any]:
+def check_user_message(
+    text: str,
+    *,
+    session_id: str | None = None,
+    audit: bool = True,
+) -> dict[str, Any]:
     """Pre-check user input.
 
     Returns {allowed: bool, category: str|None, reply: str|None}.
     If allowed is False, callers should return `reply` and skip generation.
+    When refused, appends a structured JSONL audit entry (unless audit=False).
     """
     msg = text or ""
     for pattern, category in _REFUSAL_PATTERNS:
         if pattern.search(msg):
+            if audit:
+                try:
+                    from dexibo.compliance import log_refusal
+
+                    log_refusal(
+                        category=category,
+                        user_message=msg,
+                        session_id=session_id,
+                    )
+                except Exception:  # noqa: BLE001 — never break the chat path
+                    pass
             return {
                 "allowed": False,
                 "category": category,
@@ -154,10 +171,13 @@ def check_assistant_output(text: str, *, user_message: str = "") -> str:
             softened,
             flags=re.I,
         )
-        softened = re.sub(r"\bbuy\s+([A-Z]{1,5})\s+now\b", r"discussing \1 as an example only", softened)
+        softened = re.sub(
+            r"\bbuy\s+([A-Z]{1,5})\s+now\b",
+            r"discussing \1 as an example only",
+            softened,
+        )
         out = _SOFTEN_PREFIX + softened
 
-    # Always ensure disclaimer on investment-related replies (user or assistant side)
     if _INVESTMENT_HINT.search(out) or _INVESTMENT_HINT.search(user_message or ""):
         out = _ensure_disclaimer(out)
     return out

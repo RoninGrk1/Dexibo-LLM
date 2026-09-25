@@ -23,7 +23,16 @@
 
   let sessionId = null;
   let busy = false;
+  let abortController = null;
+  let lastUserMessage = null;
+  let apiKey = localStorage.getItem('dexibo_api_key') || '';
   let watchTimer = null;
+
+  function apiHeaders(extra = {}) {
+    const h = { Accept: 'application/json', ...extra };
+    if (apiKey) h['Authorization'] = 'Bearer ' + apiKey;
+    return h;
+  }
 
   function escapeHtml(s) {
     return String(s)
@@ -95,7 +104,53 @@
     return out.filter((x, i, a) => !(x === "" && (a[i - 1] === "" || !a[i - 1]))).join("\n");
   }
 
-  function appendMessage(role, content, { html = false, typing = false } = {}) {
+  function attachAssistantActions(wrap, rawText) {
+    if (!wrap || wrap.querySelector(".msg-actions")) return;
+    const actions = document.createElement("div");
+    actions.className = "msg-actions";
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(rawText || "");
+        copyBtn.textContent = "Copied";
+        setTimeout(() => (copyBtn.textContent = "Copy"), 1200);
+      } catch (_) {
+        copyBtn.textContent = "Failed";
+      }
+    });
+    const regenBtn = document.createElement("button");
+    regenBtn.type = "button";
+    regenBtn.textContent = "Regenerate";
+    regenBtn.addEventListener("click", () => {
+      if (lastUserMessage) sendMessage(lastUserMessage, { regenerate: true });
+    });
+    actions.appendChild(copyBtn);
+    actions.appendChild(regenBtn);
+    wrap.appendChild(actions);
+  }
+
+  function renderCitations(wrap, citations) {
+    if (!wrap || !citations || !citations.length) return;
+    let row = wrap.querySelector(".citation-chips");
+    if (!row) {
+      row = document.createElement("div");
+      row.className = "citation-chips";
+      wrap.appendChild(row);
+    }
+    row.innerHTML = "";
+    for (const c of citations) {
+      const chip = document.createElement("span");
+      chip.className = "citation-chip";
+      const score = c.score != null ? ` · ${Number(c.score).toFixed(2)}` : "";
+      chip.textContent = `${c.title || c.doc_id || "source"}${score}`;
+      chip.title = c.doc_id || "";
+      row.appendChild(chip);
+    }
+  }
+
+  function appendMessage(role, content, { html = false, typing = false, citations = null } = {}) {
     const wrap = document.createElement("div");
     wrap.className = `msg ${role}`;
     const bubble = document.createElement("div");
@@ -109,6 +164,10 @@
       bubble.innerHTML = renderMarkdown(content);
     }
     wrap.appendChild(bubble);
+    if (role === "assistant" && !typing) {
+      attachAssistantActions(wrap, typeof content === "string" ? content : bubble.innerText);
+      renderCitations(wrap, citations);
+    }
     transcript.appendChild(wrap);
     transcript.scrollTop = transcript.scrollHeight;
     return wrap;
@@ -134,15 +193,19 @@
     transcript.scrollTop = transcript.scrollHeight;
   }
 
-  function finishStreamingBubble(state) {
+  function finishStreamingBubble(state, citations) {
     state.wrap.classList.remove("streaming");
     state.bubble.innerHTML = renderMarkdown(state.raw || "(empty reply)");
+    attachAssistantActions(state.wrap, state.raw || "");
+    renderCitations(state.wrap, citations || state.citations || null);
   }
 
   function setBusy(on) {
     busy = on;
     sendBtn.disabled = on;
     input.disabled = on;
+    const stopBtn = document.getElementById('stopBtn');
+    if (stopBtn) stopBtn.classList.toggle('hidden', !on);
   }
 
   function autoResize() {
@@ -267,8 +330,10 @@
   }
 
   async function sendViaStream(text) {
+    abortController = new AbortController();
     const res = await fetch("/api/chat/stream", {
       method: "POST",
+      signal: abortController.signal,
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
@@ -312,6 +377,7 @@
             sawDone = true;
             if (evt.session_id) sessionId = evt.session_id;
             if (evt.backend) setBackend(evt.backend);
+            state.citations = evt.citations || null;
           } else if (evt.type === "error") {
             errorMsg = evt.message || "stream error";
           }
@@ -327,7 +393,7 @@
       state.wrap.remove();
       throw new Error("empty stream");
     }
-    finishStreamingBubble(state);
+    finishStreamingBubble(state, state.citations);
   }
 
   async function sendViaJson(text) {
@@ -347,18 +413,21 @@
       }
       if (data.session_id) sessionId = data.session_id;
       if (data.backend) setBackend(data.backend);
-      appendMessage("assistant", data.reply || "(empty reply)");
+      appendMessage("assistant", data.reply || "(empty reply)", {
+        citations: data.citations || null,
+      });
     } catch (err) {
       thinking.remove();
       throw err;
     }
   }
 
-  async function sendMessage(raw) {
+  async function sendMessage(raw, { regenerate = false } = {}) {
     const text = (raw || "").trim();
     if (!text || busy) return;
 
-    appendMessage("user", text);
+    lastUserMessage = text;
+    if (!regenerate) appendMessage("user", text);
     input.value = "";
     autoResize();
     setBusy(true);
@@ -376,6 +445,7 @@
         `I couldn't reach the Dexibo API. Is the server running?\n\n\`${String(err)}\``
       );
     } finally {
+      abortController = null;
       setBusy(false);
       input.focus();
     }
@@ -416,4 +486,110 @@
   loadWatchlist();
   scheduleWatchlist();
   input.focus();
+
+  // ---- v0.5: sessions, stop, scenarios, compliance ----
+  async function resumeLatestSession() {
+    try {
+      const res = await fetch('/api/sessions/latest', { headers: apiHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      const sess = data.session;
+      if (!sess || !sess.id || !(sess.messages || []).length) return;
+      sessionId = sess.id;
+      transcript.innerHTML = '';
+      for (const m of sess.messages) {
+        if (m.role === 'user' || m.role === 'assistant') {
+          appendMessage(m.role, m.content || '', {
+            citations: (m.meta && m.meta.citations) || null,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('resume session failed', err);
+    }
+  }
+
+  async function newChat() {
+    try {
+      const res = await fetch('/api/sessions/new', {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      sessionId = (data.session && data.session.id) || null;
+      transcript.innerHTML = '';
+      appendMessage('assistant', WELCOME);
+    } catch (err) {
+      console.warn('new chat failed', err);
+      sessionId = null;
+      transcript.innerHTML = '';
+      appendMessage('assistant', WELCOME);
+    }
+  }
+
+  function exportMarkdown() {
+    if (!sessionId) {
+      alert('No session to export yet — send a message first.');
+      return;
+    }
+    window.open('/api/sessions/' + encodeURIComponent(sessionId) + '/export.md', '_blank');
+  }
+
+  function toggleScenarios(force) {
+    const drawer = document.getElementById('scenarioDrawer');
+    const btn = document.getElementById('scenariosBtn');
+    if (!drawer) return;
+    const open = force != null ? force : drawer.hasAttribute('hidden');
+    if (open) drawer.removeAttribute('hidden');
+    else drawer.setAttribute('hidden', '');
+    if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  async function runScenarioForm(form) {
+    const name = form.getAttribute('data-scenario');
+    const params = {};
+    for (const el of form.querySelectorAll('input[name]')) {
+      const v = el.value;
+      params[el.name] = v === '' ? null : Number(v);
+    }
+    const out = document.getElementById('scenarioResult');
+    if (out) out.textContent = 'Running…';
+    try {
+      const res = await fetch('/api/scenarios/' + encodeURIComponent(name), {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ params }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || res.statusText);
+      if (out) out.textContent = JSON.stringify(data.result, null, 2);
+    } catch (err) {
+      if (out) out.textContent = 'Error: ' + err;
+    }
+  }
+
+  const stopBtn = document.getElementById('stopBtn');
+  if (stopBtn) {
+    stopBtn.addEventListener('click', () => {
+      if (abortController) abortController.abort();
+    });
+  }
+  const newChatBtn = document.getElementById('newChatBtn');
+  if (newChatBtn) newChatBtn.addEventListener('click', () => newChat());
+  const exportMdBtn = document.getElementById('exportMdBtn');
+  if (exportMdBtn) exportMdBtn.addEventListener('click', () => exportMarkdown());
+  const scenariosBtn = document.getElementById('scenariosBtn');
+  if (scenariosBtn) scenariosBtn.addEventListener('click', () => toggleScenarios());
+  const closeScenariosBtn = document.getElementById('closeScenariosBtn');
+  if (closeScenariosBtn) closeScenariosBtn.addEventListener('click', () => toggleScenarios(false));
+  document.querySelectorAll('.scenario-form').forEach((form) => {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      runScenarioForm(form);
+    });
+  });
+
+  loadCompliance();
+  resumeLatestSession();
+
 })();

@@ -28,6 +28,7 @@ from dexibo.tools.calculator import (
 )
 from dexibo.tools.market_knowledge import CONCEPTS, lookup_concept, search_concepts
 from dexibo.tools.quotes import format_quote, get_quote, get_watchlist
+from dexibo.tools.scenarios import run_scenario
 
 app = typer.Typer(
     name="dexibo",
@@ -49,7 +50,9 @@ HELP_TEXT = """\
   /rag <query>       Show TF-IDF retrieved knowledge chunks
   /quote <symbol>    Delayed unofficial market quote (Yahoo)
   /watch             Markets watchlist table (DEXIBO_WATCHLIST)
-  /upgrades          List product upgrades (v0.2–v0.4)
+  /scenario ...      Run a scenario (savings|mortgage|inflation)
+  /json on|off       Toggle structured JSON replies
+  /upgrades          List product upgrades (v0.2–v0.5)
   /disclaimer        Show the short disclaimer
   /quit  /exit       Leave the REPL
 
@@ -60,6 +63,11 @@ HELP_TEXT = """\
   /calc return <start> <end>
   /calc cagr <start> <end> <years>
   /calc risk <r1,r2,r3,...>   (returns as % or decimals)
+
+[bold]Scenario usage[/bold]
+  /scenario savings target=<n> monthly=<n> [rate=<pct>] [years=<n>] [starting=<n>]
+  /scenario mortgage principal=<n> rate=<pct> years=<n> [shock=<pct>]
+  /scenario inflation amount=<n> years=<n> [inflation=<pct>] [return=<pct>]
 
 Anything else is sent to the assistant (mock or GGUF).
 """
@@ -73,10 +81,18 @@ UPGRADES_TEXT = """\
 [bold]v0.3[/bold]
 Web chat UI (FastAPI) at port 8787
 
-[bold cyan]v0.4 — what's new[/bold cyan]
-A. [bold]Streaming chat (SSE)[/bold] — `POST /api/chat/stream`; tokens appear live in the browser
-B. [bold]Markets watchlist[/bold] — `GET /api/watchlist`, web strip, CLI `/watch`
-   Env: `DEXIBO_WATCHLIST=AAPL,MSFT,VWRL.L,BTC-USD`
+[bold]v0.4[/bold]
+A. Streaming chat (SSE) · B. Markets watchlist
+
+[bold cyan]v0.5 — what's new[/bold cyan]
+1. [bold]Trust & compliance[/bold] — jurisdiction banner, refusal audit log, `/api/compliance`
+2. [bold]JSON mode[/bold] — stable structured replies (`DEXIBO_JSON_MODE`, `/json on`)
+3. [bold]Persistent sessions[/bold] — disk history + markdown/CSV export
+4. [bold]Eval harness[/bold] — `python scripts/run_evals.py`
+5. [bold]Lite RAG v2[/bold] — better scoring + more UK fintech notes
+6. [bold]Scenario studio[/bold] — savings / mortgage stress / inflation drag
+7. [bold]API key + rate limits[/bold] — `DEXIBO_API_KEY`, `DEXIBO_RATE_LIMIT`
+8. [bold]Streaming polish[/bold] — stop, regenerate, copy, citation chips
 """
 
 
@@ -85,15 +101,20 @@ def _banner(config: DexiboConfig, backend: str) -> None:
     title.append(config.name, style="bold cyan")
     title.append(" — ", style="dim")
     title.append(config.tagline, style="italic")
+    from dexibo.compliance import jurisdiction_banner, session_compliance_footer
+
     flags = (
         f"rag={'on' if config.enable_rag else 'off'}  "
         f"guardrails={'on' if config.enable_guardrails else 'off'}  "
-        f"quotes={'on' if config.enable_quotes else 'off'}"
+        f"quotes={'on' if config.enable_quotes else 'off'}  "
+        f"json={'on' if config.json_mode else 'off'}  "
+        f"jurisdiction={config.jurisdiction}"
     )
     body = (
         f"[dim]v{__version__}[/dim]  ·  backend: [green]{backend}[/green]\n"
         f"[dim]{flags}[/dim]\n"
-        f"[dim]{DISCLAIMER_SHORT}[/dim]\n"
+        f"[dim]{jurisdiction_banner(config.jurisdiction)}[/dim]\n"
+        f"[dim]{session_compliance_footer()}[/dim]\n"
         "Type [bold]/help[/bold] or [bold]/upgrades[/bold], or just ask a fintech question."
     )
     console.print(Panel(body, title=title, border_style="cyan"))
@@ -242,6 +263,84 @@ def _handle_watch(config: DexiboConfig) -> None:
     console.print(f"[dim]Symbols from DEXIBO_WATCHLIST · {DISCLAIMER_SHORT}[/dim]")
 
 
+def _parse_kv_args(args: list[str]) -> dict[str, float]:
+    """Parse key=value pairs (and bare numbers as positional fallbacks)."""
+    out: dict[str, float] = {}
+    for a in args:
+        if "=" in a:
+            k, v = a.split("=", 1)
+            out[k.strip().lower().replace("-", "_")] = float(v)
+        else:
+            # ignore bare tokens that aren't key=value
+            continue
+    return out
+
+
+def _handle_scenario(args: list[str]) -> None:
+    if not args or args[0] in {"help", "-h", "--help"}:
+        console.print(
+            Markdown(
+                """
+### Scenarios
+- `savings target=10000 monthly=200 [rate=3] [years=5] [starting=0]`
+- `mortgage principal=200000 rate=4.5 years=25 [shock=2]`
+- `inflation amount=10000 years=10 [inflation=2.5] [return=0]`
+"""
+            )
+        )
+        return
+    name = args[0].lower()
+    kv = _parse_kv_args(args[1:])
+    # Map friendly keys → scenario kwargs
+    aliases = {
+        "savings": "savings_goal",
+        "mortgage": "mortgage_stress",
+        "inflation": "inflation_drag",
+    }
+    scenario = aliases.get(name, name)
+    params: dict[str, float] = {}
+    try:
+        if scenario == "savings_goal":
+            if "target" not in kv or "monthly" not in kv:
+                raise ValueError("need target= and monthly=")
+            params = {
+                "target": kv["target"],
+                "monthly": kv["monthly"],
+                "annual_rate_pct": kv.get("rate", kv.get("annual_rate_pct", 3.0)),
+                "starting": kv.get("starting", 0.0),
+            }
+            if "years" in kv:
+                params["years"] = kv["years"]
+        elif scenario == "mortgage_stress":
+            if "principal" not in kv or "rate" not in kv and "annual_rate_pct" not in kv:
+                if "principal" not in kv or ("rate" not in kv and "annual_rate_pct" not in kv):
+                    raise ValueError("need principal= and rate=")
+            params = {
+                "principal": kv["principal"],
+                "annual_rate_pct": kv.get("rate", kv["annual_rate_pct"]),
+                "years": int(kv.get("years", 25)),
+                "rate_shock_pct": kv.get("shock", kv.get("rate_shock_pct", 2.0)),
+            }
+        elif scenario == "inflation_drag":
+            if "amount" not in kv or "years" not in kv:
+                raise ValueError("need amount= and years=")
+            params = {
+                "amount": kv["amount"],
+                "years": kv["years"],
+                "inflation_pct": kv.get("inflation", kv.get("inflation_pct", 2.5)),
+                "nominal_return_pct": kv.get("return", kv.get("nominal_return_pct", 0.0)),
+            }
+        else:
+            console.print(f"[red]Unknown scenario:[/red] {name}. Try /scenario help.")
+            return
+        result = run_scenario(scenario, params)
+        _print_result(result)
+        console.print(f"[dim]{DISCLAIMER_SHORT}[/dim]")
+    except (ValueError, TypeError, KeyError) as exc:
+        console.print(f"[red]Scenario error:[/red] {exc}")
+
+
+
 def _handle_slash(line: str, session: ChatSession, config: DexiboConfig) -> bool:
     """Handle a slash command. Return False if the REPL should exit."""
     parts = line.strip().split()
@@ -327,6 +426,18 @@ def _handle_slash(line: str, session: ChatSession, config: DexiboConfig) -> bool
         console.print(table)
     elif cmd == "/disclaimer":
         console.print(Panel(DISCLAIMER_SHORT, border_style="yellow"))
+    elif cmd == "/json":
+        if not args or args[0].lower() not in {"on", "off", "1", "0", "true", "false"}:
+            state = "on" if session.json_mode else "off"
+            console.print(
+                f"JSON mode is [bold]{state}[/bold]. Usage: /json on|off"
+            )
+        else:
+            on = args[0].lower() in {"on", "1", "true"}
+            session.json_mode = on
+            console.print(f"[green]JSON mode {'on' if on else 'off'}.[/green]")
+    elif cmd == "/scenario":
+        _handle_scenario(args)
     else:
         console.print(f"[yellow]Unknown command[/yellow] {cmd}. Try /help.")
     return True
@@ -337,7 +448,7 @@ def run_repl(config: DexiboConfig | None = None) -> None:
     cfg = config or load_config()
     with console.status("[cyan]Loading Dexibo…[/cyan]"):
         model = load_model(cfg)
-    session = ChatSession(model=model, config=cfg)
+    session = ChatSession(model=model, config=cfg, json_mode=cfg.json_mode)
     _banner(cfg, model.backend_name)
 
     load_err = getattr(model, "_load_error", None)
@@ -390,7 +501,7 @@ def once(
     """Non-interactive one-shot query (useful for smoke tests)."""
     cfg = load_config()
     model = load_model(cfg)
-    session = ChatSession(model=model, config=cfg)
+    session = ChatSession(model=model, config=cfg, json_mode=cfg.json_mode)
     reply = session.ask(prompt)
     console.print(Markdown(reply))
 

@@ -227,6 +227,12 @@ def detect_and_run_from_text(user_message: str) -> dict[str, Any] | None:
         r"(?:over\s+)?([\d.]+)\s*y",
         lower,
     )
+    if not m:
+        m = re.search(
+            r"(?:loan|mortgage|amorti[sz]ation|amorti[sz]e)\s+(?:for\s+)?([\d,.]+)\s+"
+            r"(?:at\s+)?([\d.]+)\s*%\s+(?:over|for|across)\s+([\d.]+)\s*y",
+            lower,
+        )
     if m:
         p, r, y = (float(m.group(i).replace(",", "")) for i in (1, 2, 3))
         return execute_tool(

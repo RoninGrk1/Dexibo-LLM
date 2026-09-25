@@ -8,12 +8,23 @@ Built to run on about **4GB of RAM** with a quantised 3B–7B model. Works in **
 
 ---
 
-## What's new in v0.4
+## What's new in v0.5
 
-Two upgrades that make Dexibo feel more like a real product:
+Tier 1 + Tier 2 upgrades for a more product-like local demo:
 
-1. **Streaming chat** — answers appear token-by-token in the web UI (`POST /api/chat/stream`). If streaming fails, it quietly falls back to the normal chat API.
-2. **Markets watchlist** — a slim quote strip above the chat (and CLI `/watch`) for symbols you choose with `DEXIBO_WATCHLIST` (default AAPL, MSFT, VWRL.L, BTC-USD). Always labelled **Delayed · unofficial**.
+**Trust & answers**
+1. **Compliance pack** — UK/EU jurisdiction banner, session disclaimer, refusal audit log (`data/audit/refusals.jsonl`), `GET /api/compliance`
+2. **JSON mode** — stable `{type, data, disclaimer, citations}` replies via `DEXIBO_JSON_MODE` or `"json": true` / CLI `/json on`
+3. **Persistent sessions** — saved under `data/sessions/`, resume on web load, export Markdown or CSV
+4. **Eval harness** — `python scripts/run_evals.py` (mock pipeline, no GGUF needed)
+
+**Tools & web**
+5. **Lite RAG v2** — better tokenisation, title/bigram boosts, more UK fintech notes (FCA, emergency fund, credit score, FX spread, auto-enrolment)
+6. **Scenario studio** — savings goal, mortgage stress, inflation drag (`POST /api/scenarios/{name}`, CLI `/scenario`, web drawer)
+7. **API key + rate limits** — optional `DEXIBO_API_KEY`, `DEXIBO_RATE_LIMIT` (default 60/min/IP)
+8. **Streaming polish** — Stop, Regenerate, Copy, citation chips under assistant replies
+
+Still fits ~**4GB** RAM. No heavier default model. Pure Python + existing deps.
 
 See `examples/upgrades.md` for curl demos.
 
@@ -185,6 +196,8 @@ knowledge/       # Short markdown notes for RAG
 scripts/         # Model download + web launcher
 models/          # Put GGUF files here (not committed)
 examples/        # Sample sessions + upgrade demos
+evals/           # Golden JSONL cases
+data/            # Sessions + refusal audit (gitkept)
 ```
 
 ---

@@ -14,3 +14,9 @@ models/**/*
 .mypy_cache/
 .ruff_cache/
 *.log
+
+# Runtime data (keep folder markers)
+data/sessions/*
+!data/sessions/.gitkeep
+data/audit/*
+!data/audit/.gitkeep

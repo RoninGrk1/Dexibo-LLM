@@ -80,3 +80,25 @@ Expected: `price`, `currency`, `as_of`, `source="delayed / unofficial …"`.
 Offline / blocked networks return `{ok: False, error: …}` gracefully.
 
 Set `DEXIBO_QUOTES=0` to disable.
+
+
+## What's new in v0.5
+
+```bash
+# Compliance
+curl -s localhost:8787/api/compliance | jq
+
+# JSON mode chat
+curl -s localhost:8787/api/chat -H 'Content-Type: application/json' \
+  -d '{"message":"What is an ISA?","json":true}' | jq
+
+# Scenarios
+curl -s localhost:8787/api/scenarios/savings_goal -H 'Content-Type: application/json' \
+  -d '{"params":{"target":10000,"monthly":200}}' | jq
+
+# Export (after a chat created a session id)
+curl -s localhost:8787/api/sessions/SESSION_ID/export.md
+
+# Evals
+python scripts/run_evals.py
+```

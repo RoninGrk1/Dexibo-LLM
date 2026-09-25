@@ -42,6 +42,13 @@ def _env_optional_int(key: str) -> int | None:
     return int(raw)
 
 
+def _env_optional_str(key: str) -> str | None:
+    raw = os.getenv(key)
+    if raw is None or not str(raw).strip():
+        return None
+    return str(raw).strip()
+
+
 @dataclass(frozen=True)
 class DexiboConfig:
     """Runtime settings for the Dexibo assistant."""
@@ -65,6 +72,11 @@ class DexiboConfig:
     rag_top_k: int = 3
     # v0.4 — markets watchlist (comma-separated tickers)
     watchlist: tuple[str, ...] = ("AAPL", "MSFT", "VWRL.L", "BTC-USD")
+    # v0.5
+    json_mode: bool = False
+    jurisdiction: str = "UK"
+    api_key: str | None = None
+    rate_limit_per_minute: int = 60
 
     @property
     def model_exists(self) -> bool:
@@ -73,7 +85,6 @@ class DexiboConfig:
     @property
     def use_mock(self) -> bool:
         return self.force_mock or not self.model_exists
-
 
 
 def _parse_watchlist(raw: str | None) -> tuple[str, ...]:
@@ -120,6 +131,10 @@ def load_config() -> DexiboConfig:
         enable_quotes=_env_bool("DEXIBO_QUOTES", True),
         rag_top_k=_env_int("DEXIBO_RAG_TOP_K", 3),
         watchlist=_parse_watchlist(os.getenv("DEXIBO_WATCHLIST")),
+        json_mode=_env_bool("DEXIBO_JSON_MODE", False),
+        jurisdiction=(os.getenv("DEXIBO_JURISDICTION") or "UK").strip().upper() or "UK",
+        api_key=_env_optional_str("DEXIBO_API_KEY"),
+        rate_limit_per_minute=_env_int("DEXIBO_RATE_LIMIT", 60),
     )
 
 

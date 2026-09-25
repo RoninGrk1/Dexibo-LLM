@@ -97,9 +97,23 @@ class Chunk:
 
 
 def tokenise(text: str) -> list[str]:
-    """Lowercase alphanumeric tokens, drop short/stop words."""
-    toks = [t.lower() for t in _TOKEN_RE.findall(text or "")]
-    return [t for t in toks if len(t) > 1 and t not in _STOP]
+    """Lowercase alphanumeric tokens; split hyphens; keep tickers/numbers."""
+    raw = (text or "").lower()
+    # Split hyphenated compounds so "open-banking" → open, banking
+    raw = raw.replace("-", " ").replace("/", " ")
+    toks = [t for t in _TOKEN_RE.findall(raw)]
+    out: list[str] = []
+    for t in toks:
+        if len(t) <= 1:
+            continue
+        if t in _STOP:
+            continue
+        out.append(t)
+    return out
+
+
+def _bigrams(tokens: list[str]) -> list[str]:
+    return [f"{a}_{b}" for a, b in zip(tokens, tokens[1:])]
 
 
 def _knowledge_dir() -> Path:
@@ -229,13 +243,26 @@ def retrieve(query: str, k: int = 3) -> list[dict[str, Any]]:
     qlen = len(q_toks)
     qvec = {t: (cnt / qlen) * idf.get(t, 0.0) for t, cnt in tf.items()}
 
+    q_set = set(q_toks)
+    q_bis = set(_bigrams(q_toks))
+
     scored: list[tuple[float, int]] = []
     for i, vec in enumerate(vectors):
         score = _cosine(qvec, vec)
-        # Light boost if query tokens appear in title
+        # Stronger title boost for overlapping tokens
         title_toks = set(tokenise(chunks[i].title))
-        if title_toks & set(q_toks):
-            score += 0.05 * len(title_toks & set(q_toks))
+        overlap = title_toks & q_set
+        if overlap:
+            score += 0.12 * len(overlap)
+        # Bigram bonus against title + body tokens
+        body_bis = set(_bigrams(tokenise(chunks[i].text[:1200])))
+        title_bis = set(_bigrams(tokenise(chunks[i].title)))
+        bi_hits = q_bis & (body_bis | title_bis)
+        if bi_hits:
+            score += 0.08 * len(bi_hits)
+        # Tiny source preference for curated knowledge docs
+        if chunks[i].source == "knowledge" and score > 0:
+            score += 0.01
         if score > 0:
             scored.append((score, i))
 
