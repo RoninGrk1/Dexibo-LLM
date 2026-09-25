@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <meta name="description" content="Dexibo — lite fintech intelligence" />
+  <title>Dexibo</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="rail" aria-label="Dexibo brand and features">
+      <div class="brand">
+        <div class="logo-mark" aria-hidden="true">D</div>
+        <div class="brand-text">
+          <span class="brand-name">Dexibo</span>
+          <span class="brand-tag">lite fintech intelligence</span>
+        </div>
+      </div>
+      <div class="backend-badge" id="backendBadge" title="Inference backend">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="backendLabel">…</span>
+      </div>
+      <nav class="feature-pills" aria-label="Feature upgrades">
+        <span class="pill" data-flag="rag">RAG</span>
+        <span class="pill" data-flag="tools">Tools</span>
+        <span class="pill" data-flag="guardrails">Guardrails</span>
+        <span class="pill" data-flag="quotes">Quotes</span>
+      </nav>
+      <p class="rail-foot">v<span id="versionLabel">0.3</span> · local demo</p>
+    </aside>
+
+    <main class="stage">
+      <header class="topbar" aria-label="Mobile brand bar">
+        <div class="logo-mark sm" aria-hidden="true">D</div>
+        <span class="brand-name">Dexibo</span>
+        <span class="backend-badge compact" id="backendBadgeMobile">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="backendLabelMobile">…</span>
+        </span>
+      </header>
+
+      <div class="transcript" id="transcript" role="log" aria-live="polite" aria-relevant="additions" aria-label="Chat transcript">
+        <!-- welcome injected by app.js -->
+      </div>
+
+      <div class="composer-wrap">
+        <div class="quick-actions" role="group" aria-label="Quick prompts">
+          <button type="button" class="chip" data-prompt="What is an ISA?">Ask ISA</button>
+          <button type="button" class="chip" data-prompt="Compound £10,000 at 5% for 10 years">Compound calc</button>
+          <button type="button" class="chip" data-prompt="What's the price of AAPL?">Quote AAPL</button>
+          <button type="button" class="chip" data-prompt="What is Open Banking?">What is Open Banking</button>
+        </div>
+        <form class="composer" id="composer" autocomplete="off">
+          <label class="sr-only" for="messageInput">Message to Dexibo</label>
+          <textarea
+            id="messageInput"
+            name="message"
+            rows="1"
+            placeholder="Ask Dexibo about markets, banking, or fintech…"
+            aria-label="Message to Dexibo"
+            enterkeyhint="send"
+          ></textarea>
+          <button type="submit" class="send-btn" id="sendBtn" aria-label="Send message">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M5 12h12M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Send</span>
+          </button>
+        </form>
+        <p class="hint">Tip: ask naturally, or try “quote AAPL” · compound interest · ISA / Open Banking</p>
+        <footer class="disclaimer">
+          Educational only — not financial advice. Verify with official sources or a regulated adviser.
+        </footer>
+      </div>
+    </main>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

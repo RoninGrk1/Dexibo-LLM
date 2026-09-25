@@ -1,0 +1,12 @@
+# Core (required) — enough for mock/demo mode smoke tests
+rich>=13.7.0
+python-dotenv>=1.0.0
+huggingface-hub>=0.23.0
+typer>=0.12.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# Optional LLM backend — needs a C++ toolchain (g++) and several minutes to build.
+# Do NOT uncomment unless you have build tools; mock mode works without it.
+#   pip install "llama-cpp-python>=0.2.90"
+#   # or: pip install -e ".[llm]"
