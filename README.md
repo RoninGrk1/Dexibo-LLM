@@ -1,237 +1,193 @@
 # Dexibo
 
-**lite fintech intelligence** — a local LLM assistant for fintech Q&A, analysis, and education, designed to run on ~4GB RAM/VRAM with quantised 3B–7B instruct models.
+**Lite fintech intelligence** — a small local assistant for finance questions, calculations, and learning.
 
-> **Not financial advice.** Dexibo educates and calculates. It does not provide personalised investment recommendations. Delayed unofficial quotes (when enabled) are labelled and are not advice.
+Built to run on about **4GB of RAM** with a quantised 3B–7B model. Works in **mock mode** without a model (calculators + education still work).
 
-## What you get
+> **Not financial advice.** Dexibo teaches and calculates. It does not recommend investments. Any market quotes are delayed, unofficial, and labelled.
 
-- Local chat REPL branded as **Dexibo**
-- GGUF inference via **llama-cpp-python** (optional; mock mode works without it)
-- Fintech calculators: compound interest, loan amortisation, % returns, CAGR, simple risk metrics
-- Curated educational concepts (ISA, APR, ETF, KYC/AML, Open Banking, …)
-- CPU-friendly defaults (`n_gpu_layers=0`, `n_ctx=4096`)
-- **v0.2 upgrades:** RAG, structured tool-calling, guardrails, delayed quotes
-- **v0.3 Web UI:** single-page FastAPI chat at `http://127.0.0.1:8787`
+---
 
-## Upgrades (v0.2)
-
-Exactly four high-value LLM upgrades ship in this release:
-
-### 1. Fintech RAG retrieval (`dexibo/rag/`)
-
-Curated UK/Europe-leaning markdown under `knowledge/` (ISA, SIPP, APR/AER, ETF, KYC/AML, Open Banking, SEPA, Basel III, volatility/Sharpe, diversification, bonds/gilts, inflation — 12 short docs). Lightweight retrieval with **no heavy ML deps**: tokenise + TF-IDF (pure Python / stdlib) over those docs plus existing `market_knowledge` concepts.
-
-- `retrieve(query, k=3)` → scored chunks
-- Wired into `ChatSession.ask` — top chunks injected as `[Retrieved context]` before `model.generate` (mock and GGUF)
-- CLI: `/rag <query>` · flags: `DEXIBO_RAG=1`, `DEXIBO_RAG_TOP_K=3`
-
-### 2. Structured calculator tool-calling (`dexibo/tools/registry.py`)
-
-Tool schema registry for `compound_interest`, `loan_amortisation`, `percent_return`, `cagr`, `risk_metrics`.
-
-- Detects calc intent in the chat pipeline
-- For LlamaCpp: appends tool instructions and parses a fenced JSON call  
-  `` ```tool\n{"name":"cagr","arguments":{...}}\n``` ``
-- Executes deterministically in Python, then feeds the result back for a natural-language reply (or formats cleanly in mock)
-- `MockModel` prefers the registry (`detect_and_run_from_text`) — **never invents calculator numbers**
-
-### 3. Compliance / advice guardrails (`dexibo/guardrails.py`)
-
-- **Pre-check** user input: refuse/redirect fraud, money-laundering how-tos, market manipulation, “help me evade KYC”
-- **Post-check** assistant output: soften personalised advice patterns (“you should buy”, “guaranteed returns”, stock tips framed as advice) and force `DISCLAIMER_SHORT`
-- Always ensure investment-related replies end with the short disclaimer if missing
-- Flag: `DEXIBO_GUARDRAILS=1` (default on) · applied in `ChatSession.ask` around generate
-
-### 4. Optional live market quotes (`dexibo/tools/quotes.py`)
-
-Delayed quotes via the public Yahoo Finance chart endpoint using **stdlib urllib only** (no yfinance).
-
-- `get_quote(symbol) -> dict` with `price`, `currency`, `as_of`, `source` labelled **delayed / unofficial**
-- Hard-fails gracefully offline
-- CLI: `/quote AAPL` or `/quote VWRL.L`
-- Wired so “what’s the price of AAPL” can call quotes when `DEXIBO_QUOTES=1` (default on)
-- System prompt: live quotes **are allowed** when the tool returns data, but must be labelled delayed and not advice
-
-See also `examples/upgrades.md` for short demos of each.
-
-## Requirements
-
-- Python **3.11+**
-- ~4GB free RAM for a Q4 3B model (more headroom is better)
-- Optional: C++ build tools if installing `llama-cpp-python` from source
-- Optional network for delayed quotes (`DEXIBO_QUOTES=1`)
-
-## Install
+## Quick start
 
 ```bash
-cd /workspace/dexibo
+git clone https://github.com/RoninGrk1/Dexibo-LLM.git
+cd Dexibo-LLM
+
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
 pip install -U pip
 pip install -e .
 ```
 
-Or with requirements:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
-
-### LLM backend (optional but recommended)
-
-`llama-cpp-python` can take several minutes to build. If the install fails or is too heavy, Dexibo still runs in **mock mode** (calculators + educational knowledge + RAG + guardrails).
-
-```bash
-pip install "llama-cpp-python>=0.2.90"
-# or
-pip install -e ".[llm]"
-```
-
-On some platforms you may need:
-
-```bash
-CMAKE_ARGS="-DLLAMA_BLAS=ON -DLLAMA_BLAS_VENDOR=OpenBLAS" pip install llama-cpp-python
-```
-
-## Download a model (~2–4.7 GB)
-
-Recommended default for ~4GB systems:
-
-| Choice | Hugging Face repo | File | Approx size |
-|--------|-------------------|------|-------------|
-| **0 (default)** | `Qwen/Qwen2.5-3B-Instruct-GGUF` | `qwen2.5-3b-instruct-q4_k_m.gguf` | **~2.0 GB** |
-| 1 | `bartowski/Phi-3.1-mini-4k-instruct-GGUF` | `Phi-3.1-mini-4k-instruct-Q4_K_M.gguf` | ~2.4 GB |
-| 2 | `Qwen/Qwen2.5-7B-Instruct-GGUF` | `qwen2.5-7b-instruct-q4_k_m.gguf` | ~4.7 GB (tight on 4GB) |
-
-```bash
-python scripts/download_model.py --list
-python scripts/download_model.py          # downloads choice 0 into models/
-python scripts/download_model.py --choice 1
-```
-
-Weights land in `models/`. Runtime memory is **higher** than file size (context + KV cache + Python). Prefer the 3B Q4_K_M on constrained boxes.
-
-Copy env defaults:
-
-```bash
-cp .env.example .env
-# edit DEXIBO_MODEL_PATH / DEXIBO_N_GPU_LAYERS if needed
-```
-
-## Run
+**Chat in the terminal**
 
 ```bash
 python -m dexibo
-# or
-dexibo
 ```
 
-One-shot smoke test:
+**Open the web UI**
 
 ```bash
-python -m dexibo once "hello"
+python -m dexibo web
+# then visit http://127.0.0.1:8787
 ```
 
-### Slash commands
+**One-line test**
 
-| Command | Purpose |
-|---------|---------|
-| `/help` | Help |
-| `/clear` | Clear history |
-| `/model` | Backend + recommended GGUFs |
-| `/calc …` | Calculators |
-| `/concept <name>` | Educational lookup |
-| `/concepts` | List concepts |
-| `/rag <query>` | TF-IDF retrieved chunks |
+```bash
+python -m dexibo once "What is an ISA?"
+```
+
+---
+
+## What Dexibo can do
+
+| Feature | What it means for you |
+|--------|------------------------|
+| **Chat** | Ask fintech questions in the terminal or browser |
+| **Calculators** | Compound interest, loans, returns, CAGR, simple risk stats — real maths, not guesses |
+| **Knowledge (RAG)** | Pulls short UK/Europe notes (ISA, SIPP, Open Banking, KYC/AML, and more) into answers |
+| **Guardrails** | Blocks scam / fraud / “evade KYC” asks; softens “you should buy X” style advice |
+| **Quotes** | Optional delayed prices (e.g. `/quote AAPL`) — labelled unofficial |
+| **Web UI** | Clean dark fintech chat at port `8787` |
+
+---
+
+## Optional: add a real LLM (~2GB download)
+
+Without a model file, Dexibo runs in **mock mode** (still useful for learning and calcs).
+
+1. Install the local LLM library (needs a C++ toolchain; can take a few minutes):
+
+```bash
+pip install -e ".[llm]"
+```
+
+2. Download the recommended ~2GB model:
+
+```bash
+python scripts/download_model.py
+```
+
+| Option | Model | Size | Notes |
+|--------|--------|------|--------|
+| **0 (default)** | Qwen2.5-3B Instruct Q4 | ~2.0 GB | Best fit for ~4GB machines |
+| 1 | Phi-3.1 mini Q4 | ~2.4 GB | Strong small alternative |
+| 2 | Qwen2.5-7B Instruct Q4 | ~4.7 GB | Heavier — may be tight on 4GB |
+
+```bash
+python scripts/download_model.py --list
+python scripts/download_model.py --choice 1
+```
+
+3. Copy settings (optional):
+
+```bash
+cp .env.example .env
+```
+
+---
+
+## Terminal commands
+
+| Command | What it does |
+|---------|----------------|
+| `/help` | Show help |
+| `/clear` | Clear chat history |
+| `/model` | Show backend and model info |
+| `/calc …` | Run a calculator |
+| `/concept <name>` | Look up a short educational note |
+| `/concepts` | List all concepts |
+| `/rag <query>` | Show retrieved knowledge chunks |
 | `/quote <symbol>` | Delayed unofficial quote |
-| `/upgrades` | List the four v0.2 upgrades |
-| `/disclaimer` | Short disclaimer |
+| `/upgrades` | List built-in upgrades |
+| `/disclaimer` | Show the short disclaimer |
 | `/quit` | Exit |
 
-Examples:
+**Calc examples**
 
 ```text
 /calc compound 10000 5 10
 /calc loan 200000 4.5 25
 /calc cagr 10000 15000 5
+```
+
+**Other examples**
+
+```text
 /concept ISA
 /rag open banking
 /quote AAPL
-/upgrades
 ```
 
+---
 
-## Web UI (v0.3)
+## Web UI
 
-A small, modern single-page chat app (vanilla HTML/CSS/JS + FastAPI) with a futuristic fintech look: deep navy/charcoal, cyan/teal accents, glass panels, Inter/system sans.
-
-**Screenshot description:** Left slim rail with a geometric **D** mark, Dexibo name, backend badge (`mock` / `llama…`), and feature pills (RAG · Tools · Guardrails · Quotes). Main column shows a welcome bubble from Dexibo, user messages right-aligned, assistant left-aligned with soft glass bubbles; bottom composer with quick-action chips (Ask ISA · Compound calc · Quote AAPL · What is Open Banking), Send button, and educational disclaimer footer. On phone the rail collapses into a compact top bar.
-
-### Run
+Modern dark chat: navy background, cyan accents, quick-action chips (ISA, compound calc, AAPL quote, Open Banking).
 
 ```bash
-cd /workspace/dexibo
-source .venv/bin/activate
-pip install -e .          # pulls fastapi + uvicorn
-python -m dexibo web      # http://127.0.0.1:8787
-# or
-python scripts/run_web.py
+python -m dexibo web
 ```
 
-Env (see `.env.example`): `DEXIBO_WEB_HOST` (default `127.0.0.1`), `DEXIBO_WEB_PORT` (default `8787`).
+Opens on **http://127.0.0.1:8787** by default.
 
-### API
+Useful API routes:
 
-| Method | Path | Body / notes |
-|--------|------|----------------|
-| `GET` | `/` | Serves `web/index.html` |
-| `GET` | `/api/health` | version, backend, feature flags |
-| `POST` | `/api/chat` | `{ "message": "...", "session_id": "optional" }` → reply + session_id + backend |
-| `GET` | `/api/quote/{symbol}` | Convenience delayed quote (when quotes enabled) |
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/health` | Version, backend, feature flags |
+| `POST` | `/api/chat` | `{ "message": "..." }` → reply |
+| `GET` | `/api/quote/{symbol}` | Delayed quote helper |
 
-Sessions are in-memory (fine for local demo). The chat pipeline is the same as the CLI: RAG inject, tools, guardrails, quotes.
+Change host/port with `DEXIBO_WEB_HOST` and `DEXIBO_WEB_PORT` (see `.env.example`).
 
-## Hardware notes
+---
 
-- **Default:** CPU only (`DEXIBO_N_GPU_LAYERS=0`) — friendly for laptops without a large GPU.
-- Raise `DEXIBO_N_GPU_LAYERS` if you have VRAM and a CUDA/Metal build of llama-cpp-python.
-- Keep `DEXIBO_N_CTX` at 2048–4096 on 4GB systems; larger context costs RAM.
-- Mock mode (`DEXIBO_FORCE_MOCK=1` or missing GGUF) needs only tens of MB.
+## Settings (common)
+
+| Env var | Default | Meaning |
+|---------|---------|---------|
+| `DEXIBO_FORCE_MOCK` | off | Force mock mode (no GGUF) |
+| `DEXIBO_MODEL_PATH` | `models/…gguf` | Path to your model file |
+| `DEXIBO_N_GPU_LAYERS` | `0` | CPU by default; raise if you have GPU |
+| `DEXIBO_N_CTX` | `4096` | Context size (lower = less RAM) |
+| `DEXIBO_RAG` | on | Knowledge retrieval |
+| `DEXIBO_GUARDRAILS` | on | Safety checks |
+| `DEXIBO_QUOTES` | on | Delayed quotes |
+| `DEXIBO_DEFAULT_CURRENCY` | `GBP` | Example currency framing |
+
+---
 
 ## Project layout
 
 ```text
-dexibo/
-  __init__.py
-  __main__.py
-  config.py
-  system_prompt.py
-  model.py          # llama-cpp + mock fallback
-  chat.py           # RAG + tools + guardrails + quotes pipeline
-  cli.py            # REPL + `web` command
-  webapp.py         # FastAPI app factory (v0.3)
-  guardrails.py
-  rag/
-    retriever.py    # pure-Python TF-IDF
-  tools/
-    calculator.py
-    market_knowledge.py
-    registry.py     # structured tool schemas
-    quotes.py       # delayed Yahoo quotes (urllib)
-web/                # static SPA (index.html, styles.css, app.js, favicon.svg)
-knowledge/          # curated markdown for RAG
-scripts/download_model.py
-scripts/run_web.py  # uvicorn launcher
-models/             # GGUF files (gitignored content)
-examples/sample_session.md
-examples/upgrades.md
+dexibo/          # Python package (chat, tools, RAG, web API)
+web/             # Browser UI (HTML / CSS / JS)
+knowledge/       # Short markdown notes for RAG
+scripts/         # Model download + web launcher
+models/          # Put GGUF files here (not committed)
+examples/        # Sample sessions
 ```
+
+---
+
+## Requirements
+
+- Python **3.11+**
+- About **4GB free RAM** for a small quantised model (mock mode needs far less)
+- Optional: C++ build tools for `llama-cpp-python`
+- Optional: network for delayed quotes
+
+---
 
 ## Disclaimer
 
-Dexibo is an **educational** assistant. It does **not** provide financial, investment, tax, or legal advice. Delayed quotes (when enabled) are unofficial and must not be treated as a live trading feed. Verify important decisions with official sources or a regulated adviser. You are responsible for compliance with laws in your jurisdiction.
+Dexibo is for **education and illustration** only. It is not financial, investment, tax, or legal advice. Quotes (when enabled) are unofficial and delayed. Check important decisions with official sources or a regulated adviser.
+
+---
 
 ## Licence
 
